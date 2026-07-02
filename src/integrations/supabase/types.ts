@@ -14,7 +14,158 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      match_runs: {
+        Row: {
+          config_id: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          matched: number
+          message: string | null
+          processed: number
+          run_type: string
+          started_at: string
+          status: string
+          total: number | null
+          unmatched: Json | null
+        }
+        Insert: {
+          config_id?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          matched?: number
+          message?: string | null
+          processed?: number
+          run_type: string
+          started_at?: string
+          status?: string
+          total?: number | null
+          unmatched?: Json | null
+        }
+        Update: {
+          config_id?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          matched?: number
+          message?: string | null
+          processed?: number
+          run_type?: string
+          started_at?: string
+          status?: string
+          total?: number | null
+          unmatched?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_runs_config_id_fkey"
+            columns: ["config_id"]
+            isOneToOne: false
+            referencedRelation: "sheet_configs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_aliases: {
+        Row: {
+          alias: string
+          canonical_name: string | null
+          created_at: string
+          id: string
+          record_id: string | null
+        }
+        Insert: {
+          alias: string
+          canonical_name?: string | null
+          created_at?: string
+          id?: string
+          record_id?: string | null
+        }
+        Update: {
+          alias?: string
+          canonical_name?: string | null
+          created_at?: string
+          id?: string
+          record_id?: string | null
+        }
+        Relationships: []
+      }
+      org_match_cache: {
+        Row: {
+          canonical_name: string | null
+          confidence: number | null
+          created_at: string
+          id: string
+          input_normalized: string
+          input_original: string
+          method: string
+          record_id: string
+        }
+        Insert: {
+          canonical_name?: string | null
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          input_normalized: string
+          input_original: string
+          method: string
+          record_id: string
+        }
+        Update: {
+          canonical_name?: string | null
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          input_normalized?: string
+          input_original?: string
+          method?: string
+          record_id?: string
+        }
+        Relationships: []
+      }
+      sheet_configs: {
+        Row: {
+          contacts_spreadsheet_url: string
+          contacts_tab: string
+          created_at: string
+          event_spreadsheet_url: string
+          event_tab: string
+          id: string
+          name: string
+          org_spreadsheet_url: string
+          org_tab: string
+          row_limit: number | null
+          updated_at: string
+        }
+        Insert: {
+          contacts_spreadsheet_url: string
+          contacts_tab: string
+          created_at?: string
+          event_spreadsheet_url: string
+          event_tab: string
+          id?: string
+          name: string
+          org_spreadsheet_url: string
+          org_tab: string
+          row_limit?: number | null
+          updated_at?: string
+        }
+        Update: {
+          contacts_spreadsheet_url?: string
+          contacts_tab?: string
+          created_at?: string
+          event_spreadsheet_url?: string
+          event_tab?: string
+          id?: string
+          name?: string
+          org_spreadsheet_url?: string
+          org_tab?: string
+          row_limit?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
