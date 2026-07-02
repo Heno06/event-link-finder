@@ -332,7 +332,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
 
       const out: string[] = [];
       const unmatched: any[] = [];
-      const newCache: { input_normalized: string; input_original: string; record_id: string; canonical_name: string | null; confidence: number; method: string }[] = [];
+      const newCache: { input_normalized: string; input_original: string; record_id: string; canonical_name: string; confidence: number; method: string }[] = [];
       let matched = 0;
 
       for (let i = 1; i <= limit; i++) {
