@@ -290,9 +290,9 @@ export const runOrgMatching = createServerFn({ method: "POST" })
       const { data: aliases } = await context.supabase.from("org_aliases").select("*");
       const aliasMap = new Map<string, string>(); // alias norm -> record_id
       for (const a of aliases ?? []) {
-        let rid = a.record_id;
+        let rid: string | null | undefined = a.record_id;
         if (!rid && a.canonical_name) {
-          rid = byExact.get(a.canonical_name.toLowerCase()) ?? byNormalized.get(normalizeOrg(a.canonical_name));
+          rid = byExact.get(a.canonical_name.toLowerCase()) ?? byNormalized.get(normalizeOrg(a.canonical_name)) ?? null;
         }
         if (rid) aliasMap.set(normalizeOrg(a.alias), rid);
       }
