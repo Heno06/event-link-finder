@@ -254,6 +254,12 @@ export const runOrgMatching = createServerFn({ method: "POST" })
     const cfg = await loadConfig(context.supabase, data.configId);
     const runId = await startRun(context.supabase, cfg.id, "org", 0);
 
+    const diag: string[] = [];
+    const log = (s: string) => {
+      diag.push(s);
+      console.log("[orgmatch]", s);
+    };
+
     try {
       // 1. Load org DB
       const orgSid = extractSpreadsheetId(cfg.org_spreadsheet_url);
@@ -261,6 +267,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
       const orgRows = await readRange(orgSid, orgRange);
       if (orgRows.length < 2) throw new Error("Org DB has no data");
       const oHeaders = orgRows[0];
+      log(`orgDB headers: ${JSON.stringify(oHeaders)}`);
       const idxRecId = findHeaderIndex(oHeaders, ["Record ID", "Record Id", "RecordID", "ID", "Id"]);
       const idxName = findHeaderIndex(oHeaders, [
         "Organization Name",
@@ -269,6 +276,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         "Org Name",
         "Company Name",
       ]);
+      log(`orgDB idxRecId=${idxRecId} idxName=${idxName}`);
       if (idxRecId === -1 || idxName === -1)
         throw new Error("Org DB requires 'Record ID' and 'Organization Name' columns");
 
@@ -285,10 +293,14 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         if (!byExact.has(name.toLowerCase())) byExact.set(name.toLowerCase(), rid);
         if (!byNormalized.has(norm)) byNormalized.set(norm, rid);
       }
+      log(`orgDB loaded ${cands.length} candidates. Sample first 5:`);
+      for (const c of cands.slice(0, 5)) {
+        log(`  [${c.recordId}] raw="${c.name}" norm="${c.normalized}"`);
+      }
 
       // 2. Alias map
       const { data: aliases } = await context.supabase.from("org_aliases").select("*");
-      const aliasMap = new Map<string, string>(); // alias norm -> record_id
+      const aliasMap = new Map<string, string>();
       for (const a of aliases ?? []) {
         let rid: string | null | undefined = a.record_id;
         if (!rid && a.canonical_name) {
@@ -296,6 +308,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         }
         if (rid) aliasMap.set(normalizeOrg(a.alias), rid);
       }
+      log(`alias map size: ${aliasMap.size}`);
 
       // 3. Cache
       const { data: cacheRows } = await context.supabase
@@ -303,6 +316,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         .select("input_normalized,record_id");
       const cache = new Map<string, string>();
       for (const c of cacheRows ?? []) cache.set(c.input_normalized, c.record_id);
+      log(`cache size: ${cache.size}`);
 
       // 4. Read event sheet
       const eventSid = extractSpreadsheetId(cfg.event_spreadsheet_url);
@@ -310,6 +324,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
       const eventRows = await readRange(eventSid, eventRange);
       if (eventRows.length < 2) throw new Error("Event sheet has no data");
       const eHeaders = eventRows[0];
+      log(`event headers: ${JSON.stringify(eHeaders)}`);
       const evIdxOrgName = findHeaderIndex(eHeaders, [
         "Organization",
         "Organization Name",
@@ -318,6 +333,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         "Company",
         "Org",
       ]);
+      log(`event idxOrgName=${evIdxOrgName}`);
       if (evIdxOrgName === -1) throw new Error("Event sheet missing organization/school column");
       let evIdxOrgId = findHeaderIndex(eHeaders, ["Organization ID", "Organization Id", "Org ID"]);
       if (evIdxOrgId === -1) {
@@ -329,42 +345,50 @@ export const runOrgMatching = createServerFn({ method: "POST" })
 
       const limit = cfg.row_limit ? Math.min(cfg.row_limit, eventRows.length - 1) : eventRows.length - 1;
       await updateRun(context.supabase, runId, { total: limit });
+      log(`processing ${limit} event rows. Fuzzy accept threshold = 0.75 (jaccard).`);
 
       const out: string[] = [];
       const unmatched: any[] = [];
       const newCache: { input_normalized: string; input_original: string; record_id: string; canonical_name: string; confidence: number; method: string }[] = [];
       let matched = 0;
+      let unmatchedLoggedCands = 0;
 
       for (let i = 1; i <= limit; i++) {
         const raw = ((eventRows[i] ?? [])[evIdxOrgName] ?? "").toString().trim();
+        const doTrace = i <= 20;
         if (!raw) {
+          if (doTrace) log(`row ${i + 1}: EMPTY org cell`);
           out.push("");
           if (i % 10 === 0) await updateRun(context.supabase, runId, { processed: i, matched });
           continue;
         }
         const norm = normalizeOrg(raw);
+        if (doTrace) log(`row ${i + 1}: raw="${raw}" norm="${norm}"`);
         let rid = "";
         let method = "";
 
         // 1 exact
-        if (byExact.has(raw.toLowerCase())) {
-          rid = byExact.get(raw.toLowerCase())!;
-          method = "exact";
-        }
+        const exactHit = byExact.get(raw.toLowerCase());
+        if (doTrace) log(`  step exact: ${exactHit ? `HIT ${exactHit}` : "miss"}`);
+        if (exactHit) { rid = exactHit; method = "exact"; }
+
         // 2 alias
-        if (!rid && aliasMap.has(norm)) {
-          rid = aliasMap.get(norm)!;
-          method = "alias";
+        if (!rid) {
+          const h = aliasMap.get(norm);
+          if (doTrace) log(`  step alias: ${h ? `HIT ${h}` : "miss"}`);
+          if (h) { rid = h; method = "alias"; }
         }
         // 3 cache
-        if (!rid && cache.has(norm)) {
-          rid = cache.get(norm)!;
-          method = "cache";
+        if (!rid) {
+          const h = cache.get(norm);
+          if (doTrace) log(`  step cache: ${h ? `HIT ${h}` : "miss"}`);
+          if (h) { rid = h; method = "cache"; }
         }
         // 4 normalized exact
-        if (!rid && byNormalized.has(norm)) {
-          rid = byNormalized.get(norm)!;
-          method = "normalized";
+        if (!rid) {
+          const h = byNormalized.get(norm);
+          if (doTrace) log(`  step normalized: ${h ? `HIT ${h}` : "miss"}`);
+          if (h) { rid = h; method = "normalized"; }
         }
         // 5 fuzzy
         let topCands: (OrgCand & { score: number })[] = [];
@@ -375,8 +399,13 @@ export const runOrgMatching = createServerFn({ method: "POST" })
             .sort((a, b) => b.score - a.score)
             .slice(0, 25);
           const best = topCands[0];
+          if (doTrace) {
+            const top3 = topCands.slice(0, 3).map((c) => `${c.score.toFixed(2)}:"${c.name}"`).join(" | ");
+            log(`  step fuzzy: top3=[${top3 || "none"}] threshold=0.75`);
+          }
           if (best && best.score >= 0.75) {
             const v = validateOrgMatch(raw, best.name);
+            if (doTrace) log(`  fuzzy validate: ok=${v.ok} reason=${v.reason ?? ""}`);
             if (v.ok) {
               rid = best.recordId;
               method = "fuzzy";
@@ -393,11 +422,14 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         }
         // 6 AI fallback
         if (!rid && topCands.length > 0) {
+          if (doTrace) log(`  step ai: attempting with ${topCands.length} candidates`);
           try {
             const ai = await aiPickBest(raw, topCands);
+            if (doTrace) log(`  ai result: recordId=${ai.recordId ?? "null"} reason="${ai.reason}"`);
             if (ai.recordId) {
               const cand = topCands.find((c) => c.recordId === ai.recordId)!;
               const v = validateOrgMatch(raw, cand.name);
+              if (doTrace) log(`  ai validate: ok=${v.ok} reason=${v.reason ?? ""}`);
               if (v.ok) {
                 rid = ai.recordId;
                 method = "ai";
@@ -411,14 +443,26 @@ export const runOrgMatching = createServerFn({ method: "POST" })
                 });
               }
             }
-          } catch (e) {
-            console.error("AI fallback failed", e);
+          } catch (e: any) {
+            log(`  ai error: ${e?.message ?? e}`);
           }
+        } else if (!rid && doTrace) {
+          log(`  step ai: skipped (no fuzzy candidates)`);
         }
+
+        if (doTrace) log(`row ${i + 1} => ${rid ? `MATCH ${rid} via ${method}` : "UNMATCHED"}`);
 
         out.push(rid);
         if (rid) matched++;
-        else unmatched.push({ row: i + 1, name: raw, topCandidates: topCands.slice(0, 3).map((c) => ({ id: c.recordId, name: c.name, score: Number(c.score.toFixed(2)) })) });
+        else {
+          // Log top-3 fuzzy candidates for up to 10 unmatched rows (in addition to trace)
+          if (unmatchedLoggedCands < 10) {
+            const top3 = topCands.slice(0, 3).map((c) => `${c.score.toFixed(2)}:"${c.name}"`).join(" | ");
+            log(`unmatched row ${i + 1} "${raw}" top3=[${top3 || "none"}]`);
+            unmatchedLoggedCands++;
+          }
+          unmatched.push({ row: i + 1, name: raw, topCandidates: topCands.slice(0, 3).map((c) => ({ id: c.recordId, name: c.name, score: Number(c.score.toFixed(2)) })) });
+        }
 
         if (i % 5 === 0) await updateRun(context.supabase, runId, { processed: i, matched });
       }
@@ -437,6 +481,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         processed: limit,
         matched,
         unmatched: unmatched.slice(0, 500),
+        message: diag.join("\n").slice(0, 200000),
         finished_at: new Date().toISOString(),
       });
 
@@ -445,6 +490,7 @@ export const runOrgMatching = createServerFn({ method: "POST" })
       await updateRun(context.supabase, runId, {
         status: "error",
         error: err?.message ?? String(err),
+        message: diag.join("\n").slice(0, 200000),
         finished_at: new Date().toISOString(),
       });
       throw err;
