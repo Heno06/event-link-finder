@@ -393,16 +393,28 @@ export const runOrgMatching = createServerFn({ method: "POST" })
         // 5 fuzzy
         let topCands: (OrgCand & { score: number })[] = [];
         if (!rid) {
-          topCands = cands
+          // Score ALL candidates (no filter) so we can log positive-scoring ones even when everything is < 0.2.
+          const scoredAll = cands
             .map((c) => ({ ...c, score: tokenScore(raw, c.name) }))
-            .filter((c) => c.score > 0.2)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 25);
+            .sort((a, b) => b.score - a.score);
+          topCands = scoredAll.filter((c) => c.score > 0.2).slice(0, 25);
           const best = topCands[0];
           if (doTrace) {
+            // NOTE: this project has NO abbreviation expander. "expanded" == normalizeOrg(raw).
+            const tokensInput = norm.split(" ").filter((t) => t.length > 1);
+            log(`  tokens(input) [n=${tokensInput.length}]: ${JSON.stringify(tokensInput)}`);
+            log(`  dbEntries at scoring time: ${cands.length}`);
+            const positives = scoredAll.filter((c) => c.score > 0);
+            log(`  candidates with score>0: ${positives.length}`);
+            const top3all = scoredAll.slice(0, 3).map((c) => {
+              const ct = c.normalized.split(" ").filter((t) => t.length > 1);
+              return `${c.score.toFixed(3)}:"${c.name}" tokens=${JSON.stringify(ct)}`;
+            }).join(" || ");
+            log(`  top3(all, pre-0.2-filter): ${top3all || "NONE"}`);
             const top3 = topCands.slice(0, 3).map((c) => `${c.score.toFixed(2)}:"${c.name}"`).join(" | ");
-            log(`  step fuzzy: top3=[${top3 || "none"}] threshold=0.75`);
+            log(`  step fuzzy (post-0.2-filter): top3=[${top3 || "none"}] accept_threshold=0.75`);
           }
+
           if (best && best.score >= 0.75) {
             const v = validateOrgMatch(raw, best.name);
             if (doTrace) log(`  fuzzy validate: ok=${v.ok} reason=${v.reason ?? ""}`);
