@@ -69,10 +69,24 @@ export function colIndexToLetter(n: number): string {
   return s;
 }
 
+// Map common Cyrillic/Greek look-alike letters to Latin so headers like
+// "Оrganization" (Cyrillic О) match "Organization".
+const LOOKALIKES: Record<string, string> = {
+  а: "a", в: "b", с: "c", е: "e", һ: "h", і: "i", ј: "j", к: "k",
+  ӏ: "l", м: "m", н: "h", о: "o", р: "p", ԛ: "q", ѕ: "s", т: "t",
+  у: "y", х: "x", ѡ: "w", ԝ: "w",
+};
+function normHeader(s: string): string {
+  const lower = (s ?? "").toString().trim().toLowerCase();
+  let out = "";
+  for (const ch of lower) out += LOOKALIKES[ch] ?? ch;
+  return out.replace(/\s+/g, " ");
+}
+
 export function findHeaderIndex(headers: string[], candidates: string[]): number {
-  const lower = headers.map((h) => (h ?? "").toString().trim().toLowerCase());
+  const norm = headers.map(normHeader);
   for (const c of candidates) {
-    const idx = lower.indexOf(c.toLowerCase());
+    const idx = norm.indexOf(normHeader(c));
     if (idx !== -1) return idx;
   }
   return -1;
